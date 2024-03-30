@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+          "name": "nodemon",
+          "console": "integratedTerminal",
+          "internalConsoleOptions": "neverOpen",
+          "program": "${workspaceFolder}/TnNumiriqueScrapper.ts",
+          "request": "launch",
+          "restart": true,
+          // "runtimeExecutable": "nodemon", /* ORIGINAL VALUE */
+          "runtimeExecutable": "${workspaceFolder}/node_modules/nodemon/bin/nodemon.js",
+          "type": "node"
+        }
+      ]
+}

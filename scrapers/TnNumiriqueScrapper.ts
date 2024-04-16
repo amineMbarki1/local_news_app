@@ -1,9 +1,10 @@
-import puppeteer, { Page } from "puppeteer";
+import puppeteer, { Browser, Page } from "puppeteer";
+import Post, { savePost } from "./Post";
+import { PostgresError } from "postgres";
 
-async function getPosts() {
+export default async function getPosts() {
   const browser = await puppeteer.launch({
-    defaultViewport: null,
-    devtools: true,
+    headless: true,
   });
 
   const page = await browser.newPage();
@@ -13,66 +14,51 @@ async function getPosts() {
     { waitUntil: "domcontentloaded" }
   );
 
-  let indicies: [number, number] = [0, 9];
-  let pageNum = 1;
-
-  const postLinks = await extractPostLinks(page);
-
-
-  
-  
-
-  loadNextPageData(page);
-
-  //console.log(await extractPostLinks(page));
-
-  //await browser.close();
-}
-
-getPosts();
-
-const indices = [0, 9];
-
-async function loadNextPageData(page: Page) {
-  page
-    .waitForResponse((request) =>
-      request
-        .url()
-        .startsWith(
-          "https://www.tunisienumerique.com/actualite-tunisie/tunisie/page/"
-        )
-    )
-    .then(() => {
-      extractPostLinks(page)
-        .then(async (links) => {
-          for (const link of links) {
-            await page.goto(link);
-            const post = await extractArticle(page, link);
-            console.log("extracted this one", post);
-          }
-          await page.goto(
-            "https://www.tunisienumerique.com/actualite-tunisie/tunisie/"
-          );
-        })
-        .then(() => {
-          indices[0] += 9;
-          indices[1] += 9;
-          loadNextPageData(page);
-        });
-    });
-  await page.click(".inf-more-but");
-}
-
-async function extractPostLinks(page: Page) {
-  return await page.evaluate(() => {
+  const links = await page.evaluate(() => {
     return Array.from(document.querySelectorAll(".infinite-post")).map(
       (el) => (el.children[0] as HTMLAnchorElement).href
     );
   });
+
+  for (const link of links) {
+    await page.goto(link, { waitUntil: "domcontentloaded" });
+    try {
+      const post = await extractArticle(page);
+      const newsPost = {
+        ...post,
+        postedOn: parsePostDate(post.postedOn!),
+      } as Post;
+      await savePost(newsPost);
+    } catch (error) {
+      if (error instanceof PostgresError)
+        return console.log("nothing to scrape");
+    }
+  }
+
+  browser.close();
 }
 
-async function extractArticle(page: Page, postLink: string) {
-  const post = await page.evaluate(() => {
+getPosts();
+
+function parsePostDate(time: string) {
+  const splitTime = time.split(" ");
+  const unit = splitTime[splitTime.length - 1];
+
+  const quantity = +splitTime[splitTime.length - 2];
+  let date = new Date();
+
+  if (unit.startsWith("heure")) date.setHours(date.getHours() - quantity);
+  else if (unit.startsWith("seconde"))
+    date.setSeconds(date.getSeconds() - quantity);
+  else if (unit.startsWith("minute"))
+    date.setSeconds(date.getSeconds() - quantity);
+  else date = new Date(time.replace("à", ""));
+
+  return date;
+}
+
+async function extractArticle(postPage: Page) {
+  const post = await postPage.evaluate(() => {
     const title = document.querySelector(".post-title")!.textContent;
     const featureImageEl = document.querySelector("#post-feat-img")!
       .children[0] as HTMLImageElement;
@@ -89,10 +75,18 @@ async function extractArticle(page: Page, postLink: string) {
     const body = paragrapheElements.reduce((accu, cur) => {
       return cur.textContent!.trim().length === 0
         ? accu
-        : accu + `<p>${cur.textContent}</p>`;
+        : accu + `${cur.innerHTML}`;
     }, "");
 
-    return { title, featureImage, body, source: "tunisienumerique.com" };
+    const date = document.querySelector(".post-date")!.textContent;
+
+    return {
+      title,
+      featureImage,
+      body,
+      source: "tunisienumerique.com",
+      postedOn: date,
+    };
   });
 
   return post;
